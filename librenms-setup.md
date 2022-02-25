@@ -2,6 +2,58 @@
 
 Both the eNodeB and the ePC must be configured individually in order for them to report statistics to the SNMP Manager. Since the eNodeB is not directly accessible from the management VPN, we configure an SNMP proxy on the ePC to pass SNMP statistics to the Management host.
 
+# ePC SNMP Configuration
+
+* Install snmpd to the ePC node:
+``` $ sudo apt install snmpd ```
+
+* Modify /etc/snmp/snmpd.conf:
+
+```
+sysLocation 	<SITE NAME STRING>
+sysContact  	lcl@seattlecommunitynetwork.org
+sysServices 	72
+master      	agentx
+agentAddress	udp:161
+com2sec readonly <SNMP Manager IP Address> <SNMP COMMUNITY STRING>
+com2sec -Cn ctx_baicells readonly <SNMP Manager IP Address> enodeb
+group readonlygroup v2c readonly
+view all included .1
+access readonlygroup "" v2c noauth exact all none none
+access readonlygroup ctx_baicells v2c noauth prefix all none none
+proxy -Cn ctx_baicells -v 2c -c private 192.168.151.1 .1.3
+```
+
+This configuration allows us to access SNMP data on the EPC with the standard community string (refer to internal standards documentation). but will proxy the Baicells SNMP data when we send the community string ‘enodeb’
+
+* Update the snmpd service file to automatically restart snmpd on crash:
+   * Edit /lib/systemd/system/snmpd.service, modify the 'ExecStart' line, and add the 'ExecReload', 'Restart', and 'RestartSec' lines:
+
+```
+[Unit]
+Description=Simple Network Management Protocol (SNMP) Daemon.
+After=network.target
+ConditionPathExists=/etc/snmp/snmpd.conf
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p /var/run/agentx
+ExecStart=/usr/sbin/snmpd -LO2w -u Debian-snmp -g Debian-snmp -I -smux,mteTrigger,mteTriggerConf -f -p /run/snmpd.pid
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+* Enable and restart snmpd:
+```
+Sudo systemctl daemon-reload
+sudo systemctl enable snmpd
+sudo systemctl restart snmpd
+```
+
 # Baicells SNMP configuration
 * Log into the Baicells configuration console:
 ```https://<Baicells IP Address>```
@@ -17,8 +69,8 @@ Both the eNodeB and the ePC must be configured individually in order for them to
       * Location: \<SITE NAME STRING\> (String should not have any spaces)
       * Source: Any
 
-# Adding New Devices to LibreNMS
-* If the ePC is running, librenms should be able to auto-discover it. Run this command from a shell on the jumpbox:
+# Adding the Node to LibreNMS
+* If the ePC is running, librenms should be able to auto-discover it. Run this command from a shell on the management host:
 ```sudo -u librenms lnms scan```
 
 * LibreNMS should print a status message that it was able to add a new device.
